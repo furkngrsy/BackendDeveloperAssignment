@@ -231,39 +231,33 @@ func deleteTaskByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	http.HandleFunc("/create-task", func(w http.ResponseWriter, r *http.Request) {
+
+	http.HandleFunc("/tasks", func(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		defer wg.Wait()
 
-		go createTask(w, r)
+		if r.Method == http.MethodPost {
+			go createTask(w, r)
+		} else if r.Method == http.MethodGet {
+			go getAllTasks(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
 	})
 
-	http.HandleFunc("/get-all-tasks", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/tasks/{id}", func(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		defer wg.Wait()
 
-		getAllTasks(w, r)
-	})
-
-	http.HandleFunc("/get-task-by-id", func(w http.ResponseWriter, r *http.Request) {
-		wg.Add(1)
-		defer wg.Wait()
-
-		go getTaskByID(w, r)
-	})
-
-	http.HandleFunc("/update-task-by-id", func(w http.ResponseWriter, r *http.Request) {
-		wg.Add(1)
-		defer wg.Wait()
-
-		go updateTaskByID(w, r)
-	})
-
-	http.HandleFunc("/delete-task-by-id", func(w http.ResponseWriter, r *http.Request) {
-		wg.Add(1)
-		defer wg.Wait()
-
-		go deleteTaskByID(w, r)
+		if r.Method == http.MethodGet {
+			go getTaskByID(w, r)
+		} else if r.Method == http.MethodPut {
+			go updateTaskByID(w, r)
+		} else if r.Method == http.MethodDelete {
+			go deleteTaskByID(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
 	})
 
 	port := 8080
