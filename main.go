@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 
 	_ "github.com/lib/pq"
 )
@@ -18,6 +19,8 @@ type Task struct {
 }
 
 var db *sql.DB
+var mu sync.Mutex
+var wg sync.WaitGroup
 
 func init() {
 	var err error
@@ -38,18 +41,29 @@ func init() {
 
 // Create a new task
 func createTask(w http.ResponseWriter, r *http.Request) {
+
+	defer wg.Done()
+
 	var task Task
 	err := json.NewDecoder(r.Body).Decode(&task)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
+
+	if task.Title == "" || task.Description == "" || task.Status == "" {
+		http.Error(w, "Title, Description, and Status are required fields", http.StatusBadRequest)
+		return
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
 
 	// Insert task into the database
 	err = db.QueryRow("INSERT INTO tasks(title, description, status) VALUES($1, $2, $3) RETURNING id",
 		task.Title, task.Description, task.Status).Scan(&task.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to create task in the database", http.StatusInternalServerError)
 		return
 	}
 
@@ -59,11 +73,19 @@ func createTask(w http.ResponseWriter, r *http.Request) {
 
 // Get all tasks
 func getAllTasks(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query("SELECT * FROM tasks")
+
+	defer wg.Done()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	rows, err := db.Query("SELECT * FROM tasks ORDER BY id")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Println("Error in getAllTasks (DB Query):", err)
+		http.Error(w, "Failed to retrieve tasks from the database", http.StatusInternalServerError)
 		return
 	}
+
 	defer rows.Close()
 
 	var tasks []Task
@@ -71,7 +93,8 @@ func getAllTasks(w http.ResponseWriter, r *http.Request) {
 		var task Task
 		err := rows.Scan(&task.ID, &task.Title, &task.Description, &task.Status)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Println("Error in getAllTasks (Row Scan):", err)
+			http.Error(w, "Failed to scan task from the database", http.StatusInternalServerError)
 			return
 		}
 		tasks = append(tasks, task)
@@ -83,6 +106,12 @@ func getAllTasks(w http.ResponseWriter, r *http.Request) {
 
 // Get a specific task by ID
 func getTaskByID(w http.ResponseWriter, r *http.Request) {
+
+	defer wg.Done()
+
+	mu.Lock()
+	defer mu.Unlock()
+
 	// Extract the task ID from the URL parameters
 	taskID := r.URL.Query().Get("id")
 	if taskID == "" {
@@ -97,7 +126,7 @@ func getTaskByID(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Task not found", http.StatusNotFound)
 		return
 	} else if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to query the database", http.StatusInternalServerError)
 		return
 	}
 
@@ -107,6 +136,12 @@ func getTaskByID(w http.ResponseWriter, r *http.Request) {
 
 // Update an existing task by ID
 func updateTaskByID(w http.ResponseWriter, r *http.Request) {
+
+	defer wg.Done()
+
+	mu.Lock()
+	defer mu.Unlock()
+
 	// Extract the task ID from the URL parameters
 	taskID := r.URL.Query().Get("id")
 	if taskID == "" {
@@ -122,7 +157,7 @@ func updateTaskByID(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Task not found", http.StatusNotFound)
 		return
 	} else if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to query the database", http.StatusInternalServerError)
 		return
 	}
 
@@ -130,7 +165,12 @@ func updateTaskByID(w http.ResponseWriter, r *http.Request) {
 	var updatedTask Task
 	err = json.NewDecoder(r.Body).Decode(&updatedTask)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if updatedTask.Title == "" || updatedTask.Description == "" || updatedTask.Status == "" {
+		http.Error(w, "Title, Description, and Status are required fields", http.StatusBadRequest)
 		return
 	}
 
@@ -143,7 +183,7 @@ func updateTaskByID(w http.ResponseWriter, r *http.Request) {
 	_, err = db.Exec("UPDATE tasks SET title = $1, description = $2, status = $3 WHERE id = $4",
 		existingTask.Title, existingTask.Description, existingTask.Status, taskID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to update task in the database", http.StatusInternalServerError)
 		return
 	}
 
@@ -153,6 +193,12 @@ func updateTaskByID(w http.ResponseWriter, r *http.Request) {
 
 // Delete a task by ID
 func deleteTaskByID(w http.ResponseWriter, r *http.Request) {
+
+	defer wg.Done()
+
+	mu.Lock()
+	defer mu.Unlock()
+
 	// Extract the task ID from the URL parameters
 	taskID := r.URL.Query().Get("id")
 	if taskID == "" {
@@ -168,14 +214,15 @@ func deleteTaskByID(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Task not found", http.StatusNotFound)
 		return
 	} else if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to query the database", http.StatusInternalServerError)
 		return
 	}
 
 	// Perform the delete
 	_, err = db.Exec("DELETE FROM tasks WHERE id = $1", taskID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("Error in deleteTaskByID (DB Exec): %v", err)
+		http.Error(w, "Failed to delete task from the database", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -184,11 +231,40 @@ func deleteTaskByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	http.HandleFunc("/create-task", createTask)
-	http.HandleFunc("/get-all-tasks", getAllTasks)
-	http.HandleFunc("/get-task-by-id", getTaskByID)
-	http.HandleFunc("/update-task-by-id", updateTaskByID)
-	http.HandleFunc("/delete-task-by-id", deleteTaskByID)
+	http.HandleFunc("/create-task", func(w http.ResponseWriter, r *http.Request) {
+		wg.Add(1)
+		defer wg.Wait()
+
+		go createTask(w, r)
+	})
+
+	http.HandleFunc("/get-all-tasks", func(w http.ResponseWriter, r *http.Request) {
+		wg.Add(1)
+		defer wg.Wait()
+
+		getAllTasks(w, r)
+	})
+
+	http.HandleFunc("/get-task-by-id", func(w http.ResponseWriter, r *http.Request) {
+		wg.Add(1)
+		defer wg.Wait()
+
+		go getTaskByID(w, r)
+	})
+
+	http.HandleFunc("/update-task-by-id", func(w http.ResponseWriter, r *http.Request) {
+		wg.Add(1)
+		defer wg.Wait()
+
+		go updateTaskByID(w, r)
+	})
+
+	http.HandleFunc("/delete-task-by-id", func(w http.ResponseWriter, r *http.Request) {
+		wg.Add(1)
+		defer wg.Wait()
+
+		go deleteTaskByID(w, r)
+	})
 
 	port := 8080
 	log.Printf("Server is running on :%d...\n", port)
