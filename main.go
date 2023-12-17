@@ -8,6 +8,10 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/swaggo/http-swagger"
+	"github.com/swaggo/swag"
+	_ "C:\Users\abduk\Desktop\Junior Backend Developer Assignment\docs"
+
 	_ "github.com/lib/pq"
 )
 
@@ -232,6 +236,7 @@ func deleteTaskByID(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 
+	//Handling for the "tasks" endpoint
 	http.HandleFunc("/tasks", func(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		defer wg.Wait()
@@ -245,6 +250,7 @@ func main() {
 		}
 	})
 
+	//Handling for the "tasks/{id}" endpoint
 	http.HandleFunc("/tasks/{id}", func(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		defer wg.Wait()
